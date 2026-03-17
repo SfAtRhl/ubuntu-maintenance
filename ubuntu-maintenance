@@ -1,0 +1,135 @@
+#!/bin/bash
+# Ubuntu Maintenance Tool PRO
+# Version 3.0
+
+set -uo pipefail
+
+VERSION="1.0"
+
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+NC="\033[0m"
+
+LOG_FILE="/var/log/ubuntu-maintenance.log"
+
+DRYRUN=false
+SECURITY_ONLY=false
+REMOVE_KERNELS=false
+
+log(){ echo -e "${BLUE}➜${NC} $1" | tee -a $LOG_FILE; }
+ok(){ echo -e "${GREEN}✔${NC} $1" | tee -a $LOG_FILE; }
+warn(){ echo -e "${YELLOW}⚠${NC} $1" | tee -a $LOG_FILE; }
+err(){ echo -e "${RED}✘${NC} $1" | tee -a $LOG_FILE; }
+
+spinner() {
+    local pid=$1
+    local spin='-\|/'
+    local i=0
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) %4 ))
+        printf "\r${YELLOW}[%c]${NC} Processing..." "${spin:$i:1}"
+        sleep .1
+    done
+    printf "\r"
+}
+
+run() {
+    if [ "$DRYRUN" = true ]; then
+        echo "DRYRUN: $*"
+    else
+        bash -c "$*" >> "$LOG_FILE" 2>&1 &
+        spinner $!
+    fi
+}
+
+# HEADER
+clear
+echo -e "${GREEN}"
+echo "██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗"
+echo "██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝╚██╗ ██╔╝"
+echo "██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║    ╚████╔╝ "
+echo "██║   ██║██╔═══╝ ██║   ██║██║╚██╗██║   ██║     ╚██╔╝  "
+echo "╚██████╔╝██║     ╚██████╔╝██║ ╚████║   ██║      ██║   "
+echo " ╚═════╝ ╚═╝      ╚═════╝ ╚═╝  ╚═══╝   ╚═╝      ╚═╝   "
+echo -e "${NC}"
+echo -e "${GREEN}Ubuntu Maintenance Tool v$VERSION${NC}"
+echo
+
+# ROOT CHECK
+if [[ $EUID -ne 0 ]]; then
+   err "Run with sudo"
+   exit 1
+fi
+
+# CLEAN APT WARNINGS (optional auto-fix)
+log "Fixing invalid APT source files..."
+run "find /etc/apt/sources.list.d/ -name '*.migrate' -delete"
+
+# UPDATE
+log "Updating package lists..."
+run "apt update -qq"
+ok "APT updated"
+
+# UPGRADE
+if [ "$SECURITY_ONLY" = true ]; then
+    log "Installing security updates..."
+    run "apt upgrade -y -qq"
+else
+    log "Upgrading system..."
+    run "apt upgrade -y -qq"
+fi
+ok "System upgraded"
+
+# AUTOREMOVE
+log "Removing unused packages..."
+run "apt autoremove -y --purge -qq"
+ok "Unused packages removed"
+
+# CLEAN
+log "Cleaning APT cache..."
+run "apt clean -qq"
+ok "APT cache cleaned"
+
+# SNAP CLEAN
+if command -v snap >/dev/null; then
+log "Cleaning old Snap revisions..."
+snap list --all | awk '/disabled/{print $1, $3}' |
+while read snapname revision; do
+    run "snap remove $snapname --revision=$revision"
+done
+ok "Snap cleaned"
+fi
+
+# LOGS
+log "Cleaning logs..."
+run "journalctl --vacuum-time=7d"
+
+# TEMP
+log "Cleaning temp files..."
+run "rm -rf /tmp/* /var/tmp/*"
+
+# SAFE KERNEL CLEANUP
+if [ "$REMOVE_KERNELS" = true ]; then
+
+log "Safely removing old kernels..."
+
+current=$(uname -r | sed 's/-generic//')
+
+dpkg --list | grep linux-image | awk '{print $2}' |
+grep -E 'linux-image-[0-9]' |
+grep -v "$current" |
+head -n -1 | while read kernel; do
+    warn "Removing $kernel"
+    run "apt purge -y $kernel"
+done
+
+ok "Old kernels safely removed"
+
+fi
+
+# FINAL REPORT
+echo
+echo -e "${GREEN}✔ Maintenance Completed Successfully${NC}"
+echo -e "${BLUE}Log saved at:${NC} $LOG_FILE"

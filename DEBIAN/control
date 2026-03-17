@@ -1,0 +1,8 @@
+Package: ubuntu-maintenance
+Version: 1.0
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Ait Rehail <soufyane.aitrehail@gmail.com>
+Description: Ubuntu maintenance and cleanup CLI tool
+ A command line tool to update, clean, and maintain Ubuntu systems.

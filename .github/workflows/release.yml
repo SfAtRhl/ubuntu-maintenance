@@ -1,0 +1,53 @@
+name: Build & Release
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        run: echo "VERSION=$(date +'%Y.%m.%d')" >> $GITHUB_OUTPUT
+
+      - name: Prepare package
+        run: |
+          mkdir -p pkg/usr/local/bin
+          cp ubuntu-maintenance pkg/usr/local/bin/
+          chmod +x pkg/usr/local/bin/ubuntu-maintenance
+      - name: Copy DEBIAN control file
+        run: |
+          mkdir -p pkg/DEBIAN
+          cp DEBIAN/control pkg/DEBIAN/
+
+      - name: Build DEB
+        run: |
+          dpkg-deb --build pkg ubuntu-maintenance-${{ steps.version.outputs.VERSION }}.deb
+
+      - name: Create Tag
+        run: |
+          git tag ${{ steps.version.outputs.VERSION }}
+          git push origin ${{ steps.version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "Release ${{ steps.version.outputs.VERSION }}"
+          body: |
+            🚀 Ubuntu Maintenance Tool Release
+
+            ✔ Auto cleanup
+            ✔ Safe kernel removal
+
+          files: ubuntu-maintenance-${{ steps.version.outputs.VERSION }}.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
